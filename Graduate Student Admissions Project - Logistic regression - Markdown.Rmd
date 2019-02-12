@@ -1,6 +1,6 @@
 ---
-title: "BAIT 509 Project - Logistic Regression"
-author: "Abhishek_Ramesh"
+title: "Graduate Student Admissions Project - Logistic Regression"
+author: "Kinjal Majumdar"
 date: "February 7, 2019"
 output: html_document
 ---
