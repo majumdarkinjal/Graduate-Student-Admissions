@@ -1,0 +1,279 @@
+---
+title: "BAIT 509 Project - Logistic Regression"
+author: "Abhishek_Ramesh"
+date: "February 7, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+Importing necessary libraries
+
+```{r - libary import}
+library(caret) # for cross validation
+library(ggplot2) # for plots
+
+```
+
+Loading and understanding the dataset - "Graduate admissions data"
+
+```{r - data input and structure}
+# Reading the dataset
+adm_data <- read.csv("Admission_Predict_Ver1.1.csv", header = TRUE)
+adm_data <- as.data.frame(adm_data) # storing it as a dataframe
+
+str(adm_data) # data structure
+
+```
+
+The dataset is structured as follows-
+
+  1. Response: admit (binary categorical - obtained from "chance.of.admission" by choosing optimal      cut-off value)
+  
+  2. Predictors: 7 (Quantitative : 3, Categorical: 4)
+  
+We observe that the dataset is highly structured and "clean" by itself 
+(source: "https://www.kaggle.com/mohansacharya/graduate-admissions")
+
+However, for purpose of our analyses, we trim down the fields and only keep the parameters that we look to leverage in our model-
+
+```{r - data processing}
+adm_data <- adm_data[-1] #removing Serial no. column
+```
+
+Due to the nature of our variables (response and explanatory), we decide to build a __Logistic Regression__ based prediction model - to predict if a student would secure an admission based on their credentials.
+
+**LOGISTIC REGRESSION**
+
+To conduct Logistic regression, we need to rope in all significant predictors into the model.
+
+In order to understand if every predictor is having a significant influence on our response variable, we need to test the significance of each predictor individually (with the "NULL" model) as follows-
+
+__Note:__
+
+1. A dummy response variable (admit) is created for this step using a cut-off value of 0.80.
+
+2. This step is only for purpose of variable testing and no predictions.
+
+3. A new response will be created during predictions - cross validated over different cut-offs
+
+
+```{r - predictor variable significance test}
+
+# Creating a dummy 'admit' response column in the dataset-
+for (j in 1:nrow(adm_data)) 
+{
+  if (as.numeric(adm_data$Chance.of.Admit[j]) >= 0.80)
+  {
+    adm_data$admit[j] <- c(1)
+  }  
+  else 
+  {
+    adm_data$admit[j] <- c(0)
+  } 
+  j = j+1
+}  
+
+adm_data$admit <- as.factor(adm_data$admit) # converting it into a factor
+
+
+# Creating the null model - intercept only model
+z.null <- glm(admit ~ 1, data=adm_data, family="binomial"(link="logit"))
+
+# Creating the individual predictor model - To test significance of each using likelihood ratio test
+
+# Critical test score-
+qchisq(0.95,1)
+# g-crticial: 3.841
+
+z.GRE <- glm(admit ~ GRE.Score, data=adm_data, family="binomial"(link="logit"))
+anova(z.null,z.GRE)
+# g-stat: 326.74
+# Result: Reject Null hypothesis
+# Conclusion: 'GRE' variable is significant in the model. Retain it.
+
+z.TOEFL <- glm(admit ~ TOEFL.Score, data=adm_data, family="binomial"(link="logit"))
+anova(z.null,z.TOEFL)
+# g-stat: 327.75
+# Result: Reject Null hypothesis
+# Conclusion: 'TOEFL' variable is significant in the model. Retain it.
+
+z.rating <- glm(admit ~ University.Rating, data=adm_data, family="binomial"(link="logit"))
+anova(z.null,z.rating)
+# g-stat: 228.45
+# Result: Reject Null hypothesis
+# Conclusion: 'University.Rating' variable is significant in the model. Retain it.
+
+z.SOP <- glm(admit ~ SOP, data=adm_data, family="binomial"(link="logit"))
+anova(z.null,z.SOP)
+# g-stat: 213.59
+# Result: Reject Null hypothesis
+# Conclusion: 'SOP' variable is significant in the model. Retain it.
+
+z.LOR <- glm(admit ~ LOR, data=adm_data, family="binomial"(link="logit"))
+anova(z.null,z.LOR)
+# g-stat: 144.98
+# Result: Reject Null hypothesis
+# Conclusion: 'LOR' variable is significant in the model. Retain it.
+
+z.CGPA <- glm(admit ~ CGPA, data=adm_data, family="binomial"(link="logit"))
+anova(z.null,z.CGPA)
+# g-stat: 425.64
+# Result: Reject Null hypothesis
+# Conclusion: 'CGPA' variable is significant in the model. Retain it.
+
+z.research <- glm(admit ~ Research, data=adm_data, family="binomial"(link="logit"))
+anova(z.null,z.research)
+# g-stat: 143.82
+# Result: Reject Null hypothesis
+# Conclusion: 'Research' variable is significant in the model. Retain it.
+
+adm_data <- adm_data[-9] #removing the dummy response field
+
+```
+
+
+From the above hypothesis test for each predictor, we conclude that every predictor is significant to our predictions.
+
+__The final model must be built from "ALL" the predictor variables.__
+
+Since response values are obtained based on hyperparameter (cut-off value), we need to determine the optimal hyperparameter value.
+
+
+**CROSS VALIDATION**
+
+
+To determine this, we create a __CROSS VALIDATION__ setup where a Logistic regression model is built for every possible cut-off value (0.5-1.0) and obtain the prediction error associated with each of these models.
+
+The cut-off value that yields the minimum prediction error would serve as the optimal cut-off value for our dataset.
+
+
+```{r - cross validation with LR}
+
+cutoff <- c() #list to store cut-offs
+prop.success <- c() # list to store % of success for each cut-off
+error <- c() #list to store error for each cut-off
+
+sensitivity <- c() #list to store sensitivity for each cut-off
+falseposrate <- c() #list to store false.positive.rate for each cut-off
+
+k <- seq(0.5,0.9, by = 0.1)
+k <- c(k,0.97) #maximum likelihood value in our data
+
+# creating the "response" field for every cut-off value
+for (i in k)
+{
+  for (j in 1:nrow(adm_data)) 
+  {
+    if (as.numeric(adm_data$Chance.of.Admit[j]) >= i)
+    {
+      adm_data$admit[j] <- c(1)
+    }  
+    else 
+    {
+      adm_data$admit[j] <- c(0)
+    } 
+    j = j+1
+  }  
+
+  adm_data$admit <- as.factor(adm_data$admit)
+  
+  # getting proportion of students with chance >= cut-off
+  prop <- table(adm_data$admit)[2] / nrow(adm_data)
+
+  prop.success <- c(prop.success,prop)
+  
+  # Creating the logistic regression model and using caret's glm with cross validation
+  train_control <- trainControl(method="cv", number=5)
+  
+  z.final <- train(as.factor(admit) ~ . - Chance.of.Admit, data=adm_data, method="glm",            family=binomial, trControl=train_control)
+  
+  # predicting the response using logistic model
+  yhat <- predict(z.final, newdata = adm_data, type="raw") 
+  
+  # creating a confusion matrix of predictions
+  conMatrix <- confusionMatrix(data = factor(yhat), adm_data$admit)
+  
+  # extracting the confusion matrix values
+  a <- as.numeric(conMatrix$table[[1]]) #true negative
+  b <- as.numeric(conMatrix$table[[2]]) #false negative
+  c <- as.numeric(conMatrix$table[[3]]) #false positive
+  d <- as.numeric(conMatrix$table[[4]]) #true positive
+  
+  senst <- (d / (b + d))
+  specif <- (a / (a + c))
+  falsepos <- (1 - specif)
+
+  # determining the prediction error in the model
+  gen_error <- (1 - conMatrix$overall['Accuracy'])
+  
+  # Forming a list of cutoffs and their corresponding errors
+  cutoff <- c(cutoff,i)
+  error <- c(error, gen_error)
+  sensitivity <- c(sensitivity, senst)
+  falseposrate <- c(falseposrate, falsepos)
+
+}  
+
+```
+
+
+Now that we have conducted the cross-validation approach, we can create a "cutoff - error" summary table as follows-
+
+```{r - error summary table}
+
+# creating a cutoff-error table
+error_table <- cbind(cutoff,error,sensitivity,falseposrate,prop.success)
+error_table
+
+```
+
+In order to visually determine the optimal cut-off, we plot a generalization error graph for each cutoff value as follows-
+
+```{r - error trend graph}
+ggplot(as.data.frame(error_table), aes(x = cutoff, y = error)) + geom_point() + geom_line() + theme_bw() +
+  ggtitle("Generalization error - For every cutoff value")+ 
+  xlab("Cut off value (To consider admitted")+ 
+  ylab("Generalization error")+
+  ylim(0,0.175)
+
+```
+
+The error-trend plot helps us get an idea of how each cut-off value affects the model prediction accuracy.
+
+However, it should also be noted that some cut-off values may yield high accuracy for predictions as the data points above the cut-off are all of same nature, thereby delivering a uniform prediction possibility.
+
+__For example:__ For a cut-off value of 0.97, we observe highest prediction accuracy. But this may be because all the data points having chance of admission of 0.97 or greater have highest chance of being admitted.
+
+
+Hence, In order to determine the opitmal cut-off value, we need to further deep-dive into the prediction parameters (sensitivity, speicificity etc.) and also to see what proportion of students have success in admission for each cut-off value.
+
+We plot the proportion of success (admits) for students for each cut-off value as follows-
+
+```{r - Proportion of students for each cut-off}
+ggplot(as.data.frame(error_table), aes(x = cutoff, y = prop.success)) + geom_point() + geom_line() + theme_bw() +
+  ggtitle("Proportion of student with admits - for each cut-off value") + 
+  xlab("Cut-off value") + 
+  ylab("Proportion of students")
+
+```
+
+
+We plot the ROC curve for the different cut-off values as follows-
+
+```{r - ROC curve}
+
+ggplot(as.data.frame(error_table), aes(x = falseposrate, y = sensitivity)) + geom_point() + geom_line() + theme_bw() +
+  ggtitle("ROC Curve - for each cut-off value") + 
+  xlab("False positive rate") + 
+  ylab("Sensitivity")
+
+```
+
+
+__Observation:__ From the plot, we see that the prediction error is the least for a cut-off value of 0.97. However, this is the maximum chance of admission a candidate can have (as per our dataset) and fitting a model on this cut-off would highly __overfit__ our predictions. This is to say that our model would predict very well on current dataset but would yield high variance when used on newer data with similar structure.
+
+Thus, we opt for the next best __cut-off value of 0.90__ which yields a __prediction error of 1.8%__ as our optimal model fit as per Logistic regression.
+
